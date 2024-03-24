@@ -1,8 +1,0 @@
-var1 = 100;
-var2 = 10;
-var3 = var1 * var2;
-while var1 < 10
-{
-print var1;
-var = var - 1;
-}
