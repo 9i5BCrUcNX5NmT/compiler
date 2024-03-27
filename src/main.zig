@@ -2,97 +2,118 @@
 
 const std = @import("std");
 const print = std.debug.print;
+const eql = std.mem.eql;
 
-const flags = struct { perem: bool, code: bool, loop: bool, is_branch: bool, brackets: u32 };
-const CompileError = error{SyntaxError};
+const flags = struct { brackets: u32 };
+const CompileError = error{ SyntaxError, ShadowingVariable, NepravilnoeVirajenie };
+const MyError = error{NedopisanCod};
 
 pub fn main() !void {
-    // const t = try read_file();
-    // print("{s}", .{t});
+    // const path_to_code = "code"; // путь к файлу с кодом
+    // const code = @embedFile(path_to_code);
+    // const allocator = std.heap.page_allocator;
 
-    const string = "let var1 = 100\nlet var2 = 10\nlet var3 = 0\nif var3 == 0\n{\nvar3 = var3 + var2\n}\nwhile var1 < 10\n{\nprint var1\nvar1 = var1 - 1\n}\n";
+    // const lines = try trim_str(code, "\n");
 
-    const lines = try trim_str(string, '\n');
+    // for (lines) |value| {
+    //     print("{s}\n", .{value});
+    // }
 
-    // var status = flags{
-    //     .perem = false,
-    //     .code = false,
-    //     .loop = false,
-    //     .is_branch = false,
-    //     .brackets = 0,
-    // };
+    const a = "a + (b * c)";
 
-    const allocator = std.heap.page_allocator;
+    const tree = try gen_tree(a);
 
-    var final_code = std.ArrayList([]const u8).init(allocator);
-    defer final_code.deinit();
-    try final_code.append(".global main\n");
+    for (tree) |node| {
+        print("нода {u} типа {any} инициализирована\n\n", .{ node.value, node.node_type });
+    }
+}
 
-    var block_map = std.AutoHashMap(usize, @TypeOf(final_code)).init(allocator);
-    defer block_map.deinit();
+const NodeType = enum { Oper, Var };
 
-    try block_map.put(0, final_code);
+const Node = struct {
+    value: u8,
+    node_type: NodeType,
+    parent: ?(*Node) = null,
+    lvl: usize = 0,
+    right: ?(*Node) = null,
+    left: ?(*Node) = null,
+};
 
-    for (lines) |line| {
-        const tokens = try trim_str(line, ' ');
+pub fn gen_tree(comptime expr: []const u8) ![]Node {
+    var node_lvl: usize = 0;
 
-        if (in_str(tokens[0], "let") and tokens[0].len == 3) {
-            try final_code.append(line[4..]);
-            try final_code.append("\n");
+    var tree: [expr.len - count_u8(expr)]Node = undefined;
+    var i: usize = 0;
+
+    tree[0] = Node{
+        .node_type = .Oper,
+        .value = 0,
+    };
+
+    for (expr) |token| {
+        if (token == '(') {
+            node_lvl += 1;
+        } else if (token == ')') {
+            node_lvl -= 1;
+        } else if (token != ' ') {
+            const ntype: NodeType = switch (token) {
+                inline '+', '-', '*', '/' => NodeType.Oper,
+                else => NodeType.Var,
+            };
+            const new_node = Node{ .value = token, .node_type = ntype, .lvl = node_lvl };
+
+            if (tree[0].node_type == .Oper) {
+                tree[0] = new_node;
+                continue;
+            }
+            i += 1;
+
+            tree[i] = new_node;
+
+            if (tree[i].node_type == tree[i - 1].node_type) {
+                return CompileError.NepravilnoeVirajenie; // Гарантия чередования типов нод
+            }
+
+            if (tree[i].lvl >= tree[i - 1].lvl) {
+                if (tree[i - 1].node_type == NodeType.Oper) {
+                    // оператор -> val
+                    tree[i - 1].left = tree[i - 1].right; // смещение налево
+                    // Связь ребёнок - родитель
+                    tree[i - 1].right = &tree[i];
+                    tree[i].parent = &tree[i - 1];
+                } else {
+                    // val -> оператор
+                    tree[i].right = &tree[i - 1];
+                    tree[i].parent = tree[i - 1].parent;
+                    tree[i - 1].right = &tree[i];
+                }
+            } else {
+                var j = i - 1;
+                while (tree[i].lvl < tree[j].lvl) {
+                    j -= 1;
+                }
+
+                tree[j].right.?.parent = &tree[i];
+                tree[i].right = tree[j].right;
+
+                tree[j].right = &tree[i];
+                tree[i].parent = &tree[j];
+                // Должна быть гарантия чередования типов нод
+            }
         }
     }
 
-    // for (lines) |line| {
-    //     const tokens = try trim_str(line, ' ');
-    //     print("{s} || {any}\n", .{ tokens, in_str(tokens[0], "let") });
-    //     if (in_str(tokens[0], "let")) {
-    //         if (!status.perem) {
-    //             status.perem = true;
-    //             try final_code.append(".data");
-    //             try final_code.append("\n");
-    //         }
-    //         try final_code.append(line[4..]);
-    //         try final_code.append("\n");
-    //     } else if (!status.code) {
-    //         status.code = true;
-    //         try final_code.append("main:\n");
-    //     } else if (in_str(tokens[0], "if")) {
-    //         // TODO
-    //         // версия с одним условием
-    //         // доделать преобразование условий для сложных выражений
-    //         try final_code.append("cmp ");
-    //         try final_code.append(tokens[1]);
-    //         try final_code.append(",");
-    //         try final_code.append(tokens[3]);
-    //         try final_code.append("\n");
-    //         if (in_str(tokens[2], "==")) {
-    //             try final_code.append("je ");
-    //         } else if (in_str(tokens[2], ">=")) {
-    //             try final_code.append("\n");
-    //         } else if (in_str(tokens[2], "<=")) {
-    //             try final_code.append("\n");
-    //         } else if (in_str(tokens[2], ">")) {
-    //             try final_code.append("\n");
-    //         } else if (in_str(tokens[2], "<")) {
-    //             try final_code.append("\n");
-    //         } else if (in_str(tokens[2], "!=")) {
-    //             try final_code.append("jne ");
-    //         }
-    //         try final_code.append("else\n");
-    //     } else if (in_str(line, "else")) {
-    //         try final_code.append("else:\n"); // записать блок с +1 brackets
-    //     } else if (in_str(line, "{")) {
-    //         status.brackets += 1;
-    //     } else if (in_str(line, "{")) {
-    //         status.brackets -= 1;
-    //         try final_code.append("main:\n");
-    //     }
-    // }
+    return &tree;
+}
 
-    print("\n\n", .{});
-    for (final_code.items) |str| {
-        print("{s}", .{str});
+pub fn count_u8(str: []const u8) usize {
+    var count = 0;
+    for (str) |c| {
+        if (c == ' ' or c == '(' or c == ')') {
+            count += 1;
+        }
     }
+    return count;
 }
 
 pub fn in_str(str1: []const u8, str2: []const u8) bool {
@@ -116,20 +137,29 @@ pub fn in_str(str1: []const u8, str2: []const u8) bool {
     return trust;
 }
 
-pub fn trim_str(str: anytype, delim: u8) ![][]const u8 {
-    var v = std.ArrayList([]const u8).init(std.heap.page_allocator);
-    var i: usize = 0;
-    for (str, 0..) |char, j| {
-        if (char == delim) {
-            try v.append(str[i..j]);
-            // print("{s}\t", .{str[i..j]});
-            // print("{}, {}\n", .{ i, j });
-            i = j + 1;
-        }
+pub fn what_jump_are_you(token: []const u8) []const u8 {
+    if (eql(u8, token, ">")) {
+        return "ja";
+    } else if (eql(u8, token, "<")) {
+        return "jl";
+    } else if (eql(u8, token, "==")) {
+        return "je";
+    } else if (eql(u8, token, ">=")) {
+        return "jge";
+    } else if (eql(u8, token, "<=")) {
+        return "jle";
+    } else if (eql(u8, token, "!=")) {
+        return "jne";
     }
-    if (delim != '\n') {
-        try v.append(str[i..str.len]);
+    return "jmp";
+}
+
+pub fn trim_str(str: anytype, delim: []const u8) ![][]const u8 {
+    const allocator = std.heap.page_allocator;
+    var lines = std.ArrayList([]const u8).init(allocator);
+    var readIter = std.mem.tokenize(u8, str, delim);
+    while (readIter.next()) |line| {
+        try lines.append(line);
     }
-    return v.items;
-    // print("{any}", .{v});
+    return lines.items;
 }
