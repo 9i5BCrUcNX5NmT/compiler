@@ -1,5 +1,4 @@
 /zig-cache
 /zig-out
-code1
-output.asm
-run.sh
+/asm
+code
