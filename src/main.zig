@@ -19,7 +19,7 @@ pub fn main() !void {
     //     print("{s}\n", .{value});
     // }
 
-    const expr = "(a + -5) * c";
+    const expr = "var1 = -1 + var3 * (a - t)";
 
     var tree = std.ArrayList(Node).init(allocator);
 
@@ -27,16 +27,14 @@ pub fn main() !void {
 
     for (tree.items) |node| {
         if (node.parent) |p| {
-            print("         // {s} \\\\         \n", .{p.value});
+            print("parent = {s}\n", .{p.value});
         }
-        print("       || parent ||         \n", .{});
-        print("         // {s} \\\\         \n", .{node.value});
-        print("      || children ||         \n", .{});
+        print("node = {s}\n", .{node.value});
         if (node.right) |r| {
-            print("      // {s} |||", .{r.value});
+            print("children = {s}", .{r.value});
         }
         if (node.left) |l| {
-            print(" {s} \\\\\n", .{l.value});
+            print(", {s}\n", .{l.value});
         }
         print("\n--------------------------\n", .{});
     }
@@ -68,13 +66,11 @@ pub fn pull_tree(comptime expr: []const u8, tree: *std.ArrayList(Node)) !void {
             var ntype: NodeType = undefined;
             if (token.len == 1) {
                 ntype = switch (token[0]) {
-                    inline '+', '-', '*', '/' => .Oper,
+                    inline '+', '-', '*', '/', '=' => .Oper,
                     else => .Var,
                 };
             } else {
-                if (token[0] == '-') {
-                    ntype = .Var;
-                }
+                ntype = .Var;
             }
 
             const curr_node = Node{ .value = token, .node_type = ntype, .lvl = node_lvl };
@@ -89,7 +85,7 @@ pub fn pull_tree(comptime expr: []const u8, tree: *std.ArrayList(Node)) !void {
             const new_node = &tree.items[len]; // ссылка на новую ноду
 
             if (new_node.node_type == prev_node.node_type) {
-                print("{s}", .{token});
+                print("{s}, {any}\n", .{ token, prev_node.node_type });
                 return CompileError.NepravilnoeVirajenie; // Гарантия чередования типов нод
             }
 
