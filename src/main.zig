@@ -3,6 +3,7 @@
 const std = @import("std");
 const print = std.debug.print;
 const eql = std.mem.eql;
+const Allocator = std.mem.Allocator;
 
 const flags = struct { brackets: u32 };
 const CompileError = error{ SyntaxError, ShadowingVariable, NepravilnoeVirajenie };
@@ -19,19 +20,20 @@ pub fn main() !void {
     //     print("{s}\n", .{value});
     // }
 
-    const a = "a + (b * c)";
+    const a = "(a + b) * c";
 
     const tree = try gen_tree(a);
+    // _ = tree;
 
-    for (tree) |node| {
-        print("нода {u} типа {any} инициализирована\n\n", .{ node.value, node.node_type });
+    for (tree) |value| {
+        print("нода {any}\n\n", .{value.value});
     }
 }
 
 const NodeType = enum { Oper, Var };
 
 const Node = struct {
-    value: u8,
+    value: []const u8,
     node_type: NodeType,
     parent: ?(*Node) = null,
     lvl: usize = 0,
@@ -39,30 +41,36 @@ const Node = struct {
     left: ?(*Node) = null,
 };
 
-pub fn gen_tree(comptime expr: []const u8) ![]Node {
+pub fn gen_tree(comptime expr: []const u8, allocator: Allocator) ![]Node {
     var node_lvl: usize = 0;
 
-    var tree: [expr.len - count_u8(expr)]Node = undefined;
+    // var tree: [expr.len - count_u8(expr)]Node = undefined;
+    var tree = std.ArrayList(Node).init(allocator);
     var i: usize = 0;
 
-    tree[0] = Node{
+    const root = Node{
         .node_type = .Oper,
-        .value = 0,
+        .value = "",
     };
 
-    for (expr) |token| {
-        if (token == '(') {
-            node_lvl += 1;
-        } else if (token == ')') {
-            node_lvl -= 1;
-        } else if (token != ' ') {
-            const ntype: NodeType = switch (token) {
-                inline '+', '-', '*', '/' => NodeType.Oper,
-                else => NodeType.Var,
-            };
-            const new_node = Node{ .value = token, .node_type = ntype, .lvl = node_lvl };
+    try tree.append(root);
 
-            if (tree[0].node_type == .Oper) {
+    var tokens = std.mem.tokenizeAny(u8, expr, " ");
+
+    while (tokens.next()) |value| {
+        if (std.mem.startsWith(u8, value, "(")) {
+            node_lvl += 1;
+        }
+
+        var new_tokens = std.mem.tokenizeAny(u8, value, "()");
+        while (new_tokens.next()) |token| {
+            const ntype: NodeType = switch (token[0]) {
+                inline '+', '-', '*', '/' => .Oper,
+                else => .Var,
+            };
+
+            const new_node = Node{ .value = token, .node_type = ntype, .lvl = node_lvl };
+            if (eql(u8, tree[0].value, "")) {
                 tree[0] = new_node;
                 continue;
             }
@@ -70,38 +78,69 @@ pub fn gen_tree(comptime expr: []const u8) ![]Node {
 
             tree[i] = new_node;
 
-            if (tree[i].node_type == tree[i - 1].node_type) {
+            var j = i - 1; // index ноды прикрепления
+
+            if (tree[i].node_type == tree[j].node_type) {
                 return CompileError.NepravilnoeVirajenie; // Гарантия чередования типов нод
             }
 
-            if (tree[i].lvl >= tree[i - 1].lvl) {
-                if (tree[i - 1].node_type == NodeType.Oper) {
+            if (tree[i].lvl >= tree[j].lvl) {
+                if (tree[j].node_type == NodeType.Oper) {
                     // оператор -> val
-                    tree[i - 1].left = tree[i - 1].right; // смещение налево
+                    tree[j].left = tree[j].right; // смещение налево
                     // Связь ребёнок - родитель
-                    tree[i - 1].right = &tree[i];
-                    tree[i].parent = &tree[i - 1];
+                    tree[j].right = &tree[i];
+                    tree[i].parent = &tree[j];
                 } else {
                     // val -> оператор
-                    tree[i].right = &tree[i - 1];
-                    tree[i].parent = tree[i - 1].parent;
-                    tree[i - 1].right = &tree[i];
+                    tree[i].right = &tree[j];
+                    if (tree[j].parent) |_| {
+                        tree[i].parent = tree[j].parent;
+                    }
+                    tree[j].parent = &tree[i];
                 }
             } else {
-                var j = i - 1;
-                while (tree[i].lvl < tree[j].lvl) {
+                while (tree[i].lvl < tree[j].lvl and j > 0) {
                     j -= 1;
                 }
+                if (j == 0) {
+                    if (tree[j].node_type == .Var) {
+                        j += 1;
+                    }
+                    tree[j].parent = &tree[i];
+                    tree[i].right = &tree[j];
+                } else {
+                    tree[j].right.?.parent = &tree[i];
+                    tree[i].right = tree[j].right;
 
-                tree[j].right.?.parent = &tree[i];
-                tree[i].right = tree[j].right;
-
-                tree[j].right = &tree[i];
-                tree[i].parent = &tree[j];
+                    tree[j].right = &tree[i];
+                    tree[i].parent = &tree[j];
+                }
                 // Должна быть гарантия чередования типов нод
+            }
+            if (std.mem.endsWith(u8, value, ")")) {
+                node_lvl -= 1;
             }
         }
     }
+
+    // for (tree) |value| {
+    //     print("нода {any}\n\n", .{value.parent});
+    // }
+
+    // for (tree) |node| {
+    //     print("noda {s} \n", .{node.value});
+    //     if (node.parent) |p| {
+    //         print("имеет родителя {s} \n", .{p.value});
+    //     }
+    //     if (node.right) |r| {
+    //         print("левого ребёнка {s} || ", .{r.value});
+    //     }
+    //     if (node.left) |l| {
+    //         print("и правого ребёнка {s}\n", .{l.value});
+    //     }
+    //     print("\n--------------------------\n", .{});
+    // }
 
     return &tree;
 }
@@ -154,12 +193,16 @@ pub fn what_jump_are_you(token: []const u8) []const u8 {
     return "jmp";
 }
 
-pub fn trim_str(str: anytype, delim: []const u8) ![][]const u8 {
-    const allocator = std.heap.page_allocator;
-    var lines = std.ArrayList([]const u8).init(allocator);
-    var readIter = std.mem.tokenize(u8, str, delim);
-    while (readIter.next()) |line| {
-        try lines.append(line);
-    }
-    return lines.items;
-}
+// pub fn trim_str(str: anytype, delim: []const u8) ![][]const u8 {
+//     const allocator = std.heap.page_allocator;
+//     var lines = std.ArrayList([]const u8).init(allocator);
+//     var readIter = std.mem.tokenize(u8, str, delim);
+//     while (readIter.next()) |line| {
+//         var readIter = std.mem.tokenize(
+//             u8,
+//             str,
+//         );
+//         try lines.append(line);
+//     }
+//     return lines.items;
+// }
