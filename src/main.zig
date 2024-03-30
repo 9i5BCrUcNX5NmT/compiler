@@ -27,14 +27,14 @@ pub fn main() !void {
 
     for (tree.items) |node| {
         if (node.parent) |p| {
-            print("parent = {s}\n", .{p.value});
+            print("parent = '{s}'\n", .{p.value});
         }
-        print("node = {s}\n", .{node.value});
+        print("node = '{s}'\n", .{node.value});
         if (node.right) |r| {
-            print("children = {s}", .{r.value});
+            print("children = '{s}'", .{r.value});
         }
         if (node.left) |l| {
-            print(", {s}\n", .{l.value});
+            print(", '{s}'\n", .{l.value});
         }
         print("\n--------------------------\n", .{});
     }
