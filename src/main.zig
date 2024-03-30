@@ -3,7 +3,6 @@
 const std = @import("std");
 const print = std.debug.print;
 const eql = std.mem.eql;
-const Allocator = std.mem.Allocator;
 
 const flags = struct { brackets: u32 };
 const CompileError = error{ SyntaxError, ShadowingVariable, NepravilnoeVirajenie };
@@ -20,13 +19,34 @@ pub fn main() !void {
     //     print("{s}\n", .{value});
     // }
 
-    const a = "(a + b) * c";
+    const expr = "(a + b) * c";
+    // const tree_len = expr.len - count_u8(expr);
 
-    const tree = try gen_tree(a);
+    var tree: [expr.len - count_u8(expr)]Node = undefined;
+
+    try pull_tree(expr, &tree);
     // _ = tree;
 
+    // for (tree) |value| {
+    //     print("нода {any}\n\n", .{value.value});
+    // }
+
     for (tree) |value| {
-        print("нода {any}\n\n", .{value.value});
+        print("нода {any}\n\n", .{value.parent});
+    }
+
+    for (tree) |node| {
+        print("noda {s} \n", .{node.value});
+        if (node.parent) |p| {
+            print("имеет родителя {s} \n", .{p.value});
+        }
+        if (node.right) |r| {
+            print("левого ребёнка {s} || ", .{r.value});
+        }
+        if (node.left) |l| {
+            print("и правого ребёнка {s}\n", .{l.value});
+        }
+        print("\n--------------------------\n", .{});
     }
 }
 
@@ -41,21 +61,16 @@ const Node = struct {
     left: ?(*Node) = null,
 };
 
-pub fn gen_tree(comptime expr: []const u8, allocator: Allocator) ![]Node {
+pub fn pull_tree(comptime expr: []const u8, tree: []Node) !void {
     var node_lvl: usize = 0;
-
-    // var tree: [expr.len - count_u8(expr)]Node = undefined;
-    var tree = std.ArrayList(Node).init(allocator);
     var i: usize = 0;
 
-    const root = Node{
+    tree[0] = Node{
         .node_type = .Oper,
         .value = "",
     };
 
-    try tree.append(root);
-
-    var tokens = std.mem.tokenizeAny(u8, expr, " ");
+    var tokens = std.mem.tokenize(u8, expr, " ");
 
     while (tokens.next()) |value| {
         if (std.mem.startsWith(u8, value, "(")) {
@@ -123,26 +138,6 @@ pub fn gen_tree(comptime expr: []const u8, allocator: Allocator) ![]Node {
             }
         }
     }
-
-    // for (tree) |value| {
-    //     print("нода {any}\n\n", .{value.parent});
-    // }
-
-    // for (tree) |node| {
-    //     print("noda {s} \n", .{node.value});
-    //     if (node.parent) |p| {
-    //         print("имеет родителя {s} \n", .{p.value});
-    //     }
-    //     if (node.right) |r| {
-    //         print("левого ребёнка {s} || ", .{r.value});
-    //     }
-    //     if (node.left) |l| {
-    //         print("и правого ребёнка {s}\n", .{l.value});
-    //     }
-    //     print("\n--------------------------\n", .{});
-    // }
-
-    return &tree;
 }
 
 pub fn count_u8(str: []const u8) usize {
