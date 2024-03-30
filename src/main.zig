@@ -11,7 +11,7 @@ const MyError = error{NedopisanCod};
 pub fn main() !void {
     // const path_to_code = "code"; // путь к файлу с кодом
     // const code = @embedFile(path_to_code);
-    // const allocator = std.heap.page_allocator;
+    const allocator = std.heap.page_allocator;
 
     // const lines = try trim_str(code, "\n");
 
@@ -19,32 +19,24 @@ pub fn main() !void {
     //     print("{s}\n", .{value});
     // }
 
-    const expr = "(a + b) * c";
-    // const tree_len = expr.len - count_u8(expr);
+    const expr = "(a + -5) * c";
 
-    var tree: [expr.len - count_u8(expr)]Node = undefined;
+    var tree = std.ArrayList(Node).init(allocator);
 
     try pull_tree(expr, &tree);
-    // _ = tree;
 
-    // for (tree) |value| {
-    //     print("нода {any}\n\n", .{value.value});
-    // }
-
-    for (tree) |value| {
-        print("нода {any}\n\n", .{value.parent});
-    }
-
-    for (tree) |node| {
-        print("noda {s} \n", .{node.value});
+    for (tree.items) |node| {
         if (node.parent) |p| {
-            print("имеет родителя {s} \n", .{p.value});
+            print("         // {s} \\\\         \n", .{p.value});
         }
+        print("       || parent ||         \n", .{});
+        print("         // {s} \\\\         \n", .{node.value});
+        print("      || children ||         \n", .{});
         if (node.right) |r| {
-            print("левого ребёнка {s} || ", .{r.value});
+            print("      // {s} |||", .{r.value});
         }
         if (node.left) |l| {
-            print("и правого ребёнка {s}\n", .{l.value});
+            print(" {s} \\\\\n", .{l.value});
         }
         print("\n--------------------------\n", .{});
     }
@@ -61,14 +53,8 @@ const Node = struct {
     left: ?(*Node) = null,
 };
 
-pub fn pull_tree(comptime expr: []const u8, tree: []Node) !void {
+pub fn pull_tree(comptime expr: []const u8, tree: *std.ArrayList(Node)) !void {
     var node_lvl: usize = 0;
-    var i: usize = 0;
-
-    tree[0] = Node{
-        .node_type = .Oper,
-        .value = "",
-    };
 
     var tokens = std.mem.tokenize(u8, expr, " ");
 
@@ -79,60 +65,66 @@ pub fn pull_tree(comptime expr: []const u8, tree: []Node) !void {
 
         var new_tokens = std.mem.tokenizeAny(u8, value, "()");
         while (new_tokens.next()) |token| {
-            const ntype: NodeType = switch (token[0]) {
-                inline '+', '-', '*', '/' => .Oper,
-                else => .Var,
-            };
+            var ntype: NodeType = undefined;
+            if (token.len == 1) {
+                ntype = switch (token[0]) {
+                    inline '+', '-', '*', '/' => .Oper,
+                    else => .Var,
+                };
+            } else {
+                if (token[0] == '-') {
+                    ntype = .Var;
+                }
+            }
 
-            const new_node = Node{ .value = token, .node_type = ntype, .lvl = node_lvl };
-            if (eql(u8, tree[0].value, "")) {
-                tree[0] = new_node;
+            const curr_node = Node{ .value = token, .node_type = ntype, .lvl = node_lvl };
+            if (tree.items.len == 0) {
+                try tree.append(curr_node);
                 continue;
             }
-            i += 1;
 
-            tree[i] = new_node;
+            const len = tree.items.len;
+            try tree.append(curr_node); // помещаем ноду в дерево
+            var prev_node = &tree.items[len - 1]; // ссылка на последнюю ноду
+            const new_node = &tree.items[len]; // ссылка на новую ноду
 
-            var j = i - 1; // index ноды прикрепления
-
-            if (tree[i].node_type == tree[j].node_type) {
+            if (new_node.node_type == prev_node.node_type) {
+                print("{s}", .{token});
                 return CompileError.NepravilnoeVirajenie; // Гарантия чередования типов нод
             }
 
-            if (tree[i].lvl >= tree[j].lvl) {
-                if (tree[j].node_type == NodeType.Oper) {
-                    // оператор -> val
-                    tree[j].left = tree[j].right; // смещение налево
-                    // Связь ребёнок - родитель
-                    tree[j].right = &tree[i];
-                    tree[i].parent = &tree[j];
+            while (prev_node.lvl > new_node.lvl) {
+                if (prev_node.parent) |parent| {
+                    prev_node = parent;
                 } else {
-                    // val -> оператор
-                    tree[i].right = &tree[j];
-                    if (tree[j].parent) |_| {
-                        tree[i].parent = tree[j].parent;
-                    }
-                    tree[j].parent = &tree[i];
+                    break;
+                }
+            }
+
+            if (prev_node.node_type == .Oper) {
+                // Oper(prev_node) =-= Var(new_node)
+
+                if (prev_node.lvl > new_node.lvl) {
+                    new_node.right = prev_node; // закрепляем прошлую ноду к правой ветви
+                    prev_node.parent = new_node; // прикрупляем новую ноду к старой
+                } else {
+                    prev_node.left = prev_node.right; // смещаем правую сторону
+                    new_node.parent = prev_node; // закрепляем родителя новой ноды
+                    prev_node.right = new_node; // прикрупляем новую ноду к правой ветви
                 }
             } else {
-                while (tree[i].lvl < tree[j].lvl and j > 0) {
-                    j -= 1;
-                }
-                if (j == 0) {
-                    if (tree[j].node_type == .Var) {
-                        j += 1;
-                    }
-                    tree[j].parent = &tree[i];
-                    tree[i].right = &tree[j];
-                } else {
-                    tree[j].right.?.parent = &tree[i];
-                    tree[i].right = tree[j].right;
+                // Var(prev_node) =-= Oper(new_node)
 
-                    tree[j].right = &tree[i];
-                    tree[i].parent = &tree[j];
+                if (prev_node.parent) |parent| {
+                    parent.right = new_node; // прикрепляем новую ноду
+                    new_node.parent = parent; // вместо предыдущей
                 }
-                // Должна быть гарантия чередования типов нод
+
+                // предыдущую к новой
+                prev_node.parent = new_node;
+                new_node.right = prev_node;
             }
+
             if (std.mem.endsWith(u8, value, ")")) {
                 node_lvl -= 1;
             }
