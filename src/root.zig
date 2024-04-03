@@ -34,7 +34,7 @@ pub fn Tree(comptime T: type) type {
 
             fn find_type(token: T) NodeType {
                 if (token.len == 1) switch (token[0]) {
-                    inline '+', '-', '*', '/', '=', '>', '<' => return .Oper,
+                    inline '+', '-', '*', '/', '=', '>', '<', '%' => return .Oper,
                     else => return .Var,
                 };
 
@@ -197,16 +197,25 @@ pub fn Tree(comptime T: type) type {
                     try str.append(reg1_small);
                     try str.append(", ");
                     try str.append(reg2_small);
+                    try str.append("\n");
+                } else if (eql(u8, node.value, "%")) {
+                    try str.append(reg2);
+                    try str.append("\n");
+                    try str.append("push rdx\n");
+                } else if (eql(u8, node.value, "/")) {
+                    try str.append(reg2);
+                    try str.append("\n");
+                    try str.append("push rax\n");
                 } else {
                     try str.append(reg1);
                     try str.append(", ");
                     try str.append(reg2);
-                }
-                try str.append("\n");
+                    try str.append("\n");
 
-                try str.append("push ");
-                try str.append(reg1);
-                try str.append("\n");
+                    try str.append("push ");
+                    try str.append(reg1);
+                    try str.append("\n");
+                }
             }
         }
 
@@ -216,6 +225,7 @@ pub fn Tree(comptime T: type) type {
                 '-' => "sub",
                 '*' => "imul", // mul работает криво
                 '=' => "mov",
+                inline '%', '/' => "idiv",
                 // '/' => "div", // TODO
                 // else => "cmp",
                 else => unreachable,
