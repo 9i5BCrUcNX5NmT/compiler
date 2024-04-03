@@ -8,8 +8,10 @@ const endsWith = std.mem.endsWith;
 const CompileError = error{NepravilnoeVirajenie};
 
 // регистры для декомпозиции дерева
-const reg1 = "rax";
-const reg2 = "rcx";
+const reg1 = "r8";
+const reg2 = "r9";
+const reg1_small = "r8w";
+const reg2_small = "r9w";
 
 pub fn Tree(comptime T: type) type {
     return struct {
@@ -191,9 +193,15 @@ pub fn Tree(comptime T: type) type {
                 const operation = oper_to_asm(node.value);
                 try str.append(operation);
                 try str.append(" ");
-                try str.append(reg1);
-                try str.append(", ");
-                try str.append(reg2);
+                if (eql(u8, operation, "imul")) {
+                    try str.append(reg1_small);
+                    try str.append(", ");
+                    try str.append(reg2_small);
+                } else {
+                    try str.append(reg1);
+                    try str.append(", ");
+                    try str.append(reg2);
+                }
                 try str.append("\n");
 
                 try str.append("push ");
@@ -206,7 +214,7 @@ pub fn Tree(comptime T: type) type {
             return if (oper.len == 1) switch (oper[0]) {
                 '+' => "add",
                 '-' => "sub",
-                '*' => "mul", // mul работает криво
+                '*' => "imul", // mul работает криво
                 '=' => "mov",
                 // '/' => "div", // TODO
                 // else => "cmp",

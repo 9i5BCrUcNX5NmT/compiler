@@ -57,25 +57,12 @@ pub fn main() !void {
     try conctenate(&all, &normal);
     try all.append("exit:\nmov rax, 60\nsyscall\n");
 
+    const output_file = try std.fs.cwd().createFile("asm/output.asm", .{});
+    defer output_file.close();
+
     for (all.items) |value| {
-        print("{s}", .{value});
+        try output_file.writeAll(value);
     }
-
-    // for (lines) |value| {
-    //     print("{s}\n", .{value});
-    // }
-
-    // const expr = "var1 = 1";
-
-    // var tree = Tree([]const u8).init(allocator);
-    // defer tree.deinit();
-
-    // try tree.pull_tree(expr);
-    // try tree.gen_output();
-
-    // for (tree.output.items) |value| {
-    //     print("{s}", .{value});
-    // }
 }
 
 fn conctenate(out: *std.ArrayList([]const u8), in: *std.ArrayList([]const u8)) !void {
