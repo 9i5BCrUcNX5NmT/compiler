@@ -1,14 +1,24 @@
 const std = @import("std");
 const print = std.debug.print;
 const Allocator = std.mem.Allocator;
+const eql = std.mem.eql;
+const startsWith = std.mem.startsWith;
+const endsWith = std.mem.endsWith;
 
 const CompileError = error{NepravilnoeVirajenie};
+
+// регистры для декомпозиции дерева
+const reg1 = "rax";
+const reg2 = "rcx";
 
 pub fn Tree(comptime T: type) type {
     return struct {
         const Self = @This();
 
         tree: std.ArrayList(Node),
+        root: ?(*Node),
+        allocator: Allocator,
+        output: std.ArrayList([]const u8),
 
         pub const Node = struct {
             const NodeType = enum { Oper, Var };
@@ -20,13 +30,23 @@ pub fn Tree(comptime T: type) type {
             right: ?(*Node),
             left: ?(*Node),
 
+            fn find_type(token: T) NodeType {
+                if (token.len == 1) switch (token[0]) {
+                    inline '+', '-', '*', '/', '=', '>', '<' => return .Oper,
+                    else => return .Var,
+                };
+
+                if (eql(u8, ">=", token) or eql(u8, "<=", token) or eql(u8, "or", token) or eql(u8, "and", token)) {
+                    return .Oper;
+                } else {
+                    return .Var;
+                }
+            }
+
             fn init(token: T, lvl: usize) Node {
                 return Node{
                     .value = token,
-                    .node_type = if (token.len == 1) switch (token[0]) {
-                        inline '+', '-', '*', '/', '=' => .Oper,
-                        else => .Var,
-                    } else .Var,
+                    .node_type = find_type(token),
                     .parent = null,
                     .lvl = lvl,
                     .right = null,
@@ -36,16 +56,21 @@ pub fn Tree(comptime T: type) type {
         };
 
         pub fn init(allocator: Allocator) Self {
-            return Self{ .tree = std.ArrayList(Node).init(allocator) };
+            return Self{ .tree = std.ArrayList(Node).init(allocator), .allocator = allocator, .output = std.ArrayList([]const u8).init(allocator), .root = null };
         }
 
-        pub fn pull_tree(self: *Self, comptime expr: T) !void {
+        pub fn deinit(self: *Self) void {
+            self.tree.deinit();
+            self.output.deinit();
+        }
+
+        pub fn pull_tree(self: *Self, expr: T) !void {
             var tree = &self.tree;
             var node_lvl: usize = 0;
             var tokens = std.mem.tokenize(u8, expr, " ");
 
             while (tokens.next()) |value| {
-                if (std.mem.startsWith(u8, value, "(")) {
+                if (startsWith(u8, value, "(")) { // контроль скобочек
                     node_lvl += 1;
                 }
 
@@ -55,6 +80,8 @@ pub fn Tree(comptime T: type) type {
                     if (tree.items.len == 0) {
                         try tree.append(curr_node);
                         continue;
+                    } else if (tree.items.len == 2) {
+                        self.root = &tree.items[1];
                     }
 
                     const len = tree.items.len;
@@ -79,10 +106,16 @@ pub fn Tree(comptime T: type) type {
                         // Oper(prev_node) =-= Var(new_node)
 
                         if (prev_node.lvl > new_node.lvl) {
+                            self.root = new_node;
                             new_node.right = prev_node; // закрепляем прошлую ноду к правой ветви
                             prev_node.parent = new_node; // прикрупляем новую ноду к старой
                         } else {
-                            prev_node.left = prev_node.right; // смещаем правую сторону
+                            if (prev_node.left) |_| {
+                                new_node.right = prev_node.right;
+                                prev_node.right.?.parent = new_node;
+                            } else {
+                                prev_node.left = prev_node.right; // смещаем правую сторону
+                            }
                             new_node.parent = prev_node; // закрепляем родителя новой ноды
                             prev_node.right = new_node; // прикрупляем новую ноду к правой ветви
                         }
@@ -99,7 +132,7 @@ pub fn Tree(comptime T: type) type {
                         new_node.right = prev_node;
                     }
 
-                    if (std.mem.endsWith(u8, value, ")")) {
+                    if (endsWith(u8, value, ")")) {
                         node_lvl -= 1;
                     }
                 }
@@ -122,14 +155,70 @@ pub fn Tree(comptime T: type) type {
                     print("parent = '{s}'\n", .{p.value});
                 }
                 print("node = '{s}'\n", .{node.value});
-                if (node.right) |r| {
-                    print("children = '{s}'", .{r.value});
-                }
                 if (node.left) |l| {
-                    print(", '{s}'\n", .{l.value});
+                    print("children = '{s}'", .{l.value});
+                }
+                if (node.right) |r| {
+                    print(", '{s}'\n", .{r.value});
                 }
                 print("\n--------------------------\n", .{});
             }
+        }
+
+        pub fn gen_output(self: *Self) !void {
+            const root = self.root.?;
+            try push_node(self, root);
+        }
+
+        fn push_node(self: *Self, node: *Node) !void {
+            var str = &self.output;
+            if (node.node_type == .Var) {
+                try str.append("push ");
+                try str.append(node.value);
+                try str.append("\n");
+            } else {
+                try push_node(self, node.right.?);
+                try push_node(self, node.left.?);
+
+                try str.append("pop ");
+                try str.append(reg1);
+                try str.append("\n");
+
+                try str.append("pop ");
+                try str.append(reg2);
+                try str.append("\n");
+
+                const operation = oper_to_asm(node.value);
+                try str.append(operation);
+                try str.append(" ");
+                try str.append(reg1);
+                try str.append(", ");
+                try str.append(reg2);
+                try str.append("\n");
+
+                try str.append("push ");
+                try str.append(reg1);
+                try str.append("\n");
+            }
+        }
+
+        fn oper_to_asm(oper: T) []const u8 {
+            return if (oper.len == 1) switch (oper[0]) {
+                '+' => "add",
+                '-' => "sub",
+                '*' => "mul", // mul работает криво
+                '=' => "mov",
+                // '/' => "div", // TODO
+                // else => "cmp",
+                else => unreachable,
+            } else unreachable;
+
+            // if (eql(u8, ">=", oper) or eql(u8, "<=", oper) or eql(u8, "or", oper) or eql(u8, "and", oper)) {
+            //     return .Oper;
+            // } else {
+            //     return .Var;
+            // }
+
         }
     };
 }

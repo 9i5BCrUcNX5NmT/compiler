@@ -1,29 +1,99 @@
 // возможности языка: переменные, операции, циклы, ветвления
+// TODO:
+//  - обработка любых выражений +
+//  - if / while утверждения =
+//  - инициализация переменных =
+//  ! перевод в asm -
+//  ! обработка выхода дерева -
 
 const std = @import("std");
 const print = std.debug.print;
-// const eql = std.mem.eql;
+const eql = std.mem.eql;
 
-const lib = @import("root.zig");
+const Tree = @import("root.zig").Tree;
 
 // const flags = struct { brackets: u32 };
 const CompileError = error{ SyntaxError, ShadowingVariable, NedopisanCod };
+const allocator = std.heap.page_allocator;
+const var_type = "dq";
 
 pub fn main() !void {
-    // const path_to_code = "code"; // путь к файлу с кодом
-    // const code = @embedFile(path_to_code);
-    const allocator = std.heap.page_allocator;
+    const path_to_code = "code"; // путь к файлу с кодом
+    const code = @embedFile(path_to_code);
+    // const code = "let a = 1\nlet b = 2\nlet c = 3\nlet var1 = 0\nvar1 = c - (a + b) \n";
 
-    // const lines = try trim_str(code, "\n");
+    var lines = std.mem.tokenize(u8, code, "\n");
+    var all = std.ArrayList([]const u8).init(allocator);
+    defer all.deinit();
+    var data = std.ArrayList([]const u8).init(allocator);
+    defer data.deinit();
+    var normal = std.ArrayList([]const u8).init(allocator);
+    defer normal.deinit();
+
+    try all.append("global _start\n");
+    try data.append("section .data\n");
+    try normal.append("_start:\n");
+
+    // генерация без if и while
+    while (lines.next()) |line| {
+        if (eql(u8, line[0..3], "let")) {
+            var tokens = std.mem.tokenize(u8, line[4..], " ");
+            const var_name = tokens.next().?;
+
+            try data.append(var_name);
+            try data.append(" ");
+            try data.append(var_type);
+            try data.append(" 0");
+            try data.append("\n");
+
+            try compute_expr(&normal, line[4..]);
+        } else {
+            try compute_expr(&normal, line);
+        }
+    }
+
+    try conctenate(&all, &data);
+    try all.append("section .text\n");
+    try conctenate(&all, &normal);
+    try all.append("exit:\nmov rax, 60\nsyscall\n");
+
+    for (all.items) |value| {
+        print("{s}", .{value});
+    }
 
     // for (lines) |value| {
     //     print("{s}\n", .{value});
     // }
 
-    const expr = "var1 = -1 + var3 * (a - t)";
-    var tree = lib.Tree([]const u8).init(allocator);
-    try tree.pull_tree(expr);
-    tree.print_tree();
+    // const expr = "var1 = 1";
+
+    // var tree = Tree([]const u8).init(allocator);
+    // defer tree.deinit();
+
+    // try tree.pull_tree(expr);
+    // try tree.gen_output();
+
+    // for (tree.output.items) |value| {
+    //     print("{s}", .{value});
+    // }
+}
+
+fn conctenate(out: *std.ArrayList([]const u8), in: *std.ArrayList([]const u8)) !void {
+    for (in.items) |value| {
+        try out.append(value);
+    }
+}
+
+fn compute_expr(block: *std.ArrayList([]const u8), line: []const u8) !void {
+    var tree = Tree([]const u8).init(allocator);
+    defer tree.deinit();
+
+    try tree.pull_tree(line);
+    try tree.gen_output();
+
+    for (tree.output.items) |value| {
+        try block.append(value);
+    }
 }
 
 // pub fn in_str(str1: []const u8, str2: []const u8) bool {
