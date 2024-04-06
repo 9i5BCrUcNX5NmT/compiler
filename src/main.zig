@@ -16,6 +16,7 @@ const Tree = @import("root.zig").Tree;
 const CompileError = error{ SyntaxError, ShadowingVariable, NedopisanCod };
 const allocator = std.heap.page_allocator;
 const var_type = "dq";
+const delim: std.mem.DelimiterType = .any;
 
 pub fn main() !void {
     const path_to_code = "code"; // путь к файлу с кодом
@@ -36,19 +37,30 @@ pub fn main() !void {
 
     // генерация без if и while
     while (lines.next()) |line| {
-        if (eql(u8, line[0..3], "let")) {
-            var tokens = std.mem.tokenize(u8, line[4..], " ");
-            const var_name = tokens.next().?;
+        var tokens = std.mem.tokenize(u8, line, " ");
+        const first = tokens.next().?;
+        var var_name: []const u8 = undefined;
+        // print("({s})", .{tokens.rest()});
+
+        if (eql(u8, first, "let")) {
+            var_name = tokens.next().?;
+            _ = tokens.next().?; // = TODO
 
             try data.append(var_name);
             try data.append(" ");
             try data.append(var_type);
-            try data.append(" 0");
-            try data.append("\n");
+            if (is_coplex_expr(&tokens)) {
+                try data.append(" 0");
 
-            try compute_expr(&normal, line[4..]);
+                try var_expr(var_name, &tokens, &normal);
+            } else {
+                try data.append(" ");
+                const var_value = tokens.next().?;
+                try data.append(var_value);
+            }
+            try data.append("\n");
         } else {
-            try compute_expr(&normal, line);
+            try var_expr(var_name, &tokens, &normal);
         }
     }
 
@@ -65,17 +77,51 @@ pub fn main() !void {
     }
 }
 
+fn var_expr(var_name: []const u8, tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]const u8)) !void {
+    if (is_coplex_expr(tokens)) {
+        try compute_expr(block, tokens);
+
+        try block.append("pop ");
+        try block.append(var_name);
+        try block.append("\n");
+    } else {
+        const value = tokens.next().?;
+        try block.append("mov ");
+        try block.append(var_name);
+        try block.append(", ");
+        try block.append(value);
+        try block.append("\n");
+    }
+}
+
+fn in_char(line: []const u8, char: u8) bool {
+    for (line) |ch| {
+        if (ch == char) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn is_coplex_expr(tokens: *std.mem.TokenIterator(u8, delim)) bool {
+    if (eql(u8, tokens.peek().?, tokens.rest())) {
+        return false;
+    } else {
+        return true;
+    }
+}
+
 fn conctenate(out: *std.ArrayList([]const u8), in: *std.ArrayList([]const u8)) !void {
     for (in.items) |value| {
         try out.append(value);
     }
 }
 
-fn compute_expr(block: *std.ArrayList([]const u8), line: []const u8) !void {
+fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterator(u8, delim)) !void {
     var tree = Tree([]const u8).init(allocator);
     defer tree.deinit();
 
-    try tree.pull_tree(line);
+    try tree.pull_tree(tokens);
     try tree.gen_output();
 
     for (tree.output.items) |value| {

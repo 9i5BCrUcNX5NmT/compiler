@@ -66,10 +66,9 @@ pub fn Tree(comptime T: type) type {
             self.output.deinit();
         }
 
-        pub fn pull_tree(self: *Self, expr: T) !void {
+        pub fn pull_tree(self: *Self, tokens: *std.mem.TokenIterator(u8, .any)) !void {
             var tree = &self.tree;
             var node_lvl: usize = 0;
-            var tokens = std.mem.tokenize(u8, expr, " ");
 
             while (tokens.next()) |value| {
                 if (startsWith(u8, value, "(")) { // контроль скобочек
@@ -197,6 +196,10 @@ pub fn Tree(comptime T: type) type {
                     try str.append(reg1_small);
                     try str.append(", ");
                     try str.append(reg2_small);
+                    try str.append("\n");
+
+                    try str.append("push ");
+                    try str.append(reg1);
                     try str.append("\n");
                 } else if (eql(u8, node.value, "%")) {
                     try str.append(reg2);
