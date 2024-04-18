@@ -1,9 +1,10 @@
 // возможности языка: переменные, операции, циклы, ветвления
 // TODO:
 //  - обработка любых выражений +
-//  - if / while утверждения =
-//  - инициализация переменных =
-//  ! перевод в asm -
+//  - инициализация переменных +
+//  ! перевод в asm:
+//      - (+,-,/,%,*) +
+//      - if / while -
 //  ! обработка выхода дерева -
 
 const std = @import("std");
@@ -23,6 +24,9 @@ pub fn main() !void {
     const code = @embedFile(path_to_code);
     // const code = "let a = 1\nlet b = 2\nlet c = 3\nlet var1 = 0\nvar1 = c - (a + b) \n";
 
+    var vars = std.StringHashMap(bool).init(allocator);
+    defer vars.deinit();
+
     var lines = std.mem.tokenize(u8, code, "\n");
     var all = std.ArrayList([]const u8).init(allocator);
     defer all.deinit();
@@ -32,41 +36,42 @@ pub fn main() !void {
     defer normal.deinit();
 
     try all.append("global _start\n");
+    try all.append("extern _print\n");
     try data.append("section .data\n");
     try normal.append("_start:\n");
 
-    // генерация без if и while
     while (lines.next()) |line| {
         var tokens = std.mem.tokenize(u8, line, " ");
         const first = tokens.next().?;
         var var_name: []const u8 = undefined;
         // print("({s})", .{tokens.rest()});
+        if (!eql(u8, first, "if") and !eql(u8, first, "while")) {
+            var_name = first;
+            _ = tokens.next().?; // = TODO может быть ошибка если нет равно в выражении
 
-        if (eql(u8, first, "let")) {
-            var_name = tokens.next().?;
-            _ = tokens.next().?; // = TODO
+            if (!vars.contains(var_name)) {
+                // print("\n-------------\n", .{});
+                try vars.put(var_name, true); // добавлени в спиисок переменных
 
-            try data.append(var_name);
-            try data.append(" ");
-            try data.append(var_type);
-            if (is_coplex_expr(&tokens)) {
-                try data.append(" 0");
-
-                try var_expr(var_name, &tokens, &normal);
-            } else {
+                try data.append(var_name);
                 try data.append(" ");
-                const var_value = tokens.next().?;
-                try data.append(var_value);
+                try data.append(var_type);
+                try data.append(" 0\n");
             }
-            try data.append("\n");
+            try var_expr(var_name, &tokens, &normal, &vars);
+        } else if (eql(u8, first, "if")) {
+            // TODO cmp
+        } else if (eql(u8, first, "while")) {
+            // TODO jmp
         } else {
-            try var_expr(var_name, &tokens, &normal);
+            unreachable;
         }
     }
 
     try conctenate(&all, &data);
     try all.append("section .text\n");
     try conctenate(&all, &normal);
+    try all.append("mov r15, r8\ncall _print\n");
     try all.append("exit:\nmov rax, 60\nsyscall\n");
 
     const output_file = try std.fs.cwd().createFile("asm/output.asm", .{});
@@ -77,20 +82,30 @@ pub fn main() !void {
     }
 }
 
-fn var_expr(var_name: []const u8, tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]const u8)) !void {
+fn var_expr(var_name: []const u8, tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool)) !void {
     if (is_coplex_expr(tokens)) {
-        try compute_expr(block, tokens);
+        try compute_expr(block, tokens, vars);
 
-        try block.append("pop ");
+        try block.append("pop r8\n");
+        try block.append("mov qword[");
         try block.append(var_name);
-        try block.append("\n");
+        try block.append("], r8\n");
     } else {
-        const value = tokens.next().?;
-        try block.append("mov ");
+        const var_value = tokens.next().?;
+
+        if (vars.contains(var_value)) {
+            try block.append("push qword[");
+            try block.append(var_value);
+            try block.append("]\n");
+        } else {
+            try block.append("push ");
+            try block.append(var_value);
+            try block.append("\n");
+        }
+
+        try block.append("pop qword[");
         try block.append(var_name);
-        try block.append(", ");
-        try block.append(value);
-        try block.append("\n");
+        try block.append("]\n");
     }
 }
 
@@ -117,11 +132,13 @@ fn conctenate(out: *std.ArrayList([]const u8), in: *std.ArrayList([]const u8)) !
     }
 }
 
-fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterator(u8, delim)) !void {
+fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterator(u8, delim), vars: *std.StringHashMap(bool)) !void {
     var tree = Tree([]const u8).init(allocator);
     defer tree.deinit();
+    errdefer tree.print_tree();
 
-    try tree.pull_tree(tokens);
+    try tree.pull_tree(tokens, vars);
+
     try tree.gen_output();
 
     for (tree.output.items) |value| {
