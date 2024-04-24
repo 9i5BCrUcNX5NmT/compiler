@@ -77,6 +77,7 @@ pub fn Tree(comptime T: type) type {
                 }
 
                 var new_tokens = std.mem.tokenizeAny(u8, value, "()");
+
                 while (new_tokens.next()) |token| {
                     const curr_node = Node.init(token, node_lvl, vars);
 
@@ -105,63 +106,110 @@ pub fn Tree(comptime T: type) type {
                         return CompileError.NepravilnoeVirajenie; // Гарантия чередования типов нод
                     }
 
-                    while (prev_node.lvl > new_node.lvl) {
-                        if (prev_node.parent) |parent| {
-                            prev_node = parent;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if (prev_node.lvl > new_node.lvl) {
-                        // Oper(prev_node)
-                        //  -_
-                        //    -_
-                        //      Oper(new_node)
-
-                        self.root = new_node;
-                        new_node.right = prev_node; // закрепляем прошлую ноду к правой ветви
-                        prev_node.parent = new_node; // прикрупляем новую ноду к старой
+                    if (prev_node.node_type == .Oper) {
+                        prev_node.left = prev_node.right;
+                        prev_node.right = new_node;
+                        new_node.parent = prev_node;
                     } else {
-                        if (new_node.node_type == .Oper) {
-                            // Var(prev_node)
-                            //  -_
-                            //    -_
-                            //      Oper(new_node)
-
-                            if (eql(u8, new_node.value, "+") or eql(u8, new_node.value, "-")) {
-                                new_node.right = self.root;
-                                self.root.?.parent = new_node;
-                                self.root = new_node;
+                        while (prev_node.lvl > new_node.lvl) {
+                            if (prev_node.parent) |parent| {
+                                prev_node = parent;
                             } else {
-                                if (prev_node.parent) |parent| {
-                                    if (parent.left) |_| {
-                                        new_node.right = prev_node;
-                                        prev_node.parent = new_node;
-                                    } else {
-                                        parent.left = parent.right; // смещаем правую сторону
-                                    }
-
-                                    new_node.parent = parent; // закрепляем родителя новой ноды
-                                    parent.right = new_node; // прикрепляем новую ноду к правой ветви
-                                } else {
-                                    return CompileError.NepravilnoeVirajenie;
-                                }
+                                break;
                             }
-                        } else {
-                            // Oper(prev_node)
-                            //  -_
-                            //    -_
-                            //      Var(new_node)
-                            prev_node.left = prev_node.right; // смещаем правую сторону
-                            prev_node.right = new_node;
-                            new_node.parent = prev_node;
                         }
 
-                        if (endsWith(u8, value, ")")) {
-                            node_lvl -= 1;
+                        if (prev_node.lvl > new_node.lvl) {
+                            self.root = new_node;
+                            new_node.right = prev_node;
+                            prev_node.parent = new_node;
+                        } else {
+                            if (prev_node.node_type != .Oper) {
+                                prev_node = prev_node.parent.?;
+                            }
+                            if (prev_node.lvl == new_node.lvl and (eql(u8, prev_node.value, "*") or eql(u8, prev_node.value, "/") or eql(u8, prev_node.value, "&")) and !(eql(u8, new_node.value, "*") or eql(u8, new_node.value, "/") or eql(u8, new_node.value, "&"))) {
+                                const parent = prev_node.parent.?;
+                                prev_node.parent = new_node;
+                                parent.right = new_node;
+                                new_node.parent = parent;
+                                new_node.right = prev_node;
+                            } else {
+                                prev_node.right.?.parent = new_node;
+                                new_node.right = prev_node.right;
+                                prev_node.right = new_node;
+                                new_node.parent = prev_node;
+                                // prnode - oper | var
+                                // if (prev_node.parent) |parent| {
+                                //     parent.right = new_node;
+                                //     new_node.parent = parent;
+                                // } else {
+                                //     self.root = new_node;
+                                // }
+                                // new_node.right = prev_node;
+                                // prev_node.parent = new_node;
+                            }
                         }
                     }
+
+                    // while (prev_node.lvl > new_node.lvl) {
+                    //     if (prev_node.parent) |parent| {
+                    //         prev_node = parent;
+                    //     } else {
+                    //         break;
+                    //     }
+                    // }
+
+                    // if (prev_node.lvl > new_node.lvl) {
+                    //     // Oper(prev_node)
+                    //     //  -_
+                    //     //    -_
+                    //     //      Oper(new_node)
+
+                    //     self.root = new_node;
+                    //     new_node.right = prev_node; // закрепляем прошлую ноду к правой ветви
+                    //     prev_node.parent = new_node; // прикрупляем новую ноду к старой
+                    // } else {
+                    //     if (new_node.node_type == .Oper) {
+                    //         // Var(prev_node)
+                    //         //  -_
+                    //         //    -_
+                    //         //      Oper(new_node)
+
+                    //         if ((eql(u8, new_node.value, "+") or eql(u8, new_node.value, "-")) and (new_node.lvl == prev_node.lvl)) {
+                    //             new_node.right = prev_node;
+                    //             prev_node.parent = new_node;
+                    //             if (self.root.?.lvl == new_node.lvl) {
+                    //                 self.root = new_node;
+                    //             }
+                    //         } else {
+                    //             if (prev_node.parent) |parent| {
+                    //                 if (parent.left) |_| {
+                    //                     new_node.right = prev_node;
+                    //                     prev_node.parent = new_node;
+                    //                 } else {
+                    //                     parent.left = parent.right; // смещаем правую сторону
+                    //                 }
+
+                    //                 new_node.parent = parent; // закрепляем родителя новой ноды
+                    //                 parent.right = new_node; // прикрепляем новую ноду к правой ветви
+                    //             } else {
+                    //                 return CompileError.NepravilnoeVirajenie;
+                    //             }
+                    //         }
+                    //     } else {
+                    //         // Oper(prev_node)
+                    //         //  -_
+                    //         //    -_
+                    //         //      Var(new_node)
+                    //         prev_node.left = prev_node.right; // смещаем правую сторону
+                    //         prev_node.right = new_node;
+                    //         new_node.parent = prev_node;
+                    //     }
+
+                }
+
+                if (endsWith(u8, value, ")")) {
+                    node_lvl -= 1;
                 }
             }
         }

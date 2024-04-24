@@ -139,6 +139,8 @@ fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterato
 
     try tree.pull_tree(tokens, vars);
 
+    tree.print_tree();
+
     try tree.gen_output();
 
     for (tree.output.items) |value| {
