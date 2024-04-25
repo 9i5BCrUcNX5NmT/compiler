@@ -10,8 +10,6 @@ const CompileError = error{NepravilnoeVirajenie};
 // регистры для декомпозиции дерева
 const reg1 = "r8";
 const reg2 = "r9";
-const reg1_small = "r8w";
-const reg2_small = "r9w";
 
 pub fn Tree(comptime T: type) type {
     return struct {

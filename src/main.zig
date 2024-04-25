@@ -40,12 +40,17 @@ pub fn main() !void {
     try data.append("section .data\n");
     try normal.append("_start:\n");
 
+    // var loop_id = lines.rest().len;
     while (lines.next()) |line| {
         var tokens = std.mem.tokenize(u8, line, " ");
         const first = tokens.next().?;
         var var_name: []const u8 = undefined;
-        // print("({s})", .{tokens.rest()});
-        if (!eql(u8, first, "if") and !eql(u8, first, "while")) {
+
+        if (eql(u8, first, "{")) {
+            try normal.append("l1:\n");
+        } else if (eql(u8, first, "}")) {
+            try normal.append("l2:\n");
+        } else if (!eql(u8, first, "if") and !eql(u8, first, "while")) {
             var_name = first;
             _ = tokens.next().?; // = TODO может быть ошибка если нет равно в выражении
 
@@ -61,9 +66,16 @@ pub fn main() !void {
             try var_expr(var_name, &tokens, &normal, &vars);
         } else if (eql(u8, first, "if")) {
             // TODO cmp
+            try var_expr(var_name, &tokens, &normal, &vars);
+            try normal.append("pop\n");
+            try normal.append("jne l1\n");
+            try normal.append("jmp l2\n");
+
+            // TODO обработка
+
         } else if (eql(u8, first, "while")) {
             // TODO jmp
-        } else {
+        } else  {
             unreachable;
         }
     }
@@ -139,8 +151,6 @@ fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterato
 
     try tree.pull_tree(tokens, vars);
 
-    tree.print_tree();
-
     try tree.gen_output();
 
     for (tree.output.items) |value| {
@@ -169,22 +179,22 @@ fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterato
 //     return trust;
 // }
 
-// pub fn what_jump_are_you(token: []const u8) []const u8 {
-//     if (eql(u8, token, ">")) {
-//         return "ja";
-//     } else if (eql(u8, token, "<")) {
-//         return "jl";
-//     } else if (eql(u8, token, "==")) {
-//         return "je";
-//     } else if (eql(u8, token, ">=")) {
-//         return "jge";
-//     } else if (eql(u8, token, "<=")) {
-//         return "jle";
-//     } else if (eql(u8, token, "!=")) {
-//         return "jne";
-//     }
-//     return "jmp";
-// }
+pub fn what_jump_are_you(token: []const u8) []const u8 {
+    if (eql(u8, token, ">")) {
+        return "ja";
+    } else if (eql(u8, token, "<")) {
+        return "jl";
+    } else if (eql(u8, token, "==")) {
+        return "je";
+    } else if (eql(u8, token, ">=")) {
+        return "jge";
+    } else if (eql(u8, token, "<=")) {
+        return "jle";
+    } else if (eql(u8, token, "!=")) {
+        return "jne";
+    }
+    return "jmp";
+}
 
 // pub fn trim_str(str: anytype, delim: []const u8) ![][]const u8 {
 //     const allocator = std.heap.page_allocator;
