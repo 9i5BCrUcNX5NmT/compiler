@@ -2,4 +2,4 @@
 /zig-out
 /asm
 /src/code
-grammary.y
+grammar.y
