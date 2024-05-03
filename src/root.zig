@@ -198,8 +198,7 @@ pub fn Tree(comptime T: type) type {
                 const operation = oper_to_asm(node.value);
 
                 if (eql(u8, operation, "idiv")) {
-                    try str.append("pop rax\n");
-                    try str.append("cqo\n");
+                    try str.append("pop rax\ncqo\n");
                 } else {
                     try str.append("pop ");
                     try str.append(reg1);

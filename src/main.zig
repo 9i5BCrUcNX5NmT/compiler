@@ -19,16 +19,16 @@ const allocator = std.heap.page_allocator;
 const var_type = "dq";
 const delim: std.mem.DelimiterType = .any;
 
+var block_counter: usize = 1;
+
 pub fn main() !void {
     const path_to_code = "code"; // путь к файлу с кодом
     const code = @embedFile(path_to_code);
-    // const code = "let a = 1\nlet b = 2\nlet c = 3\nlet var1 = 0\nvar1 = c - (a + b) \n";
-
-    var vars = std.StringHashMap(bool).init(allocator);
-    defer vars.deinit();
 
     var lines = std.mem.tokenize(u8, code, "\n");
 
+    var vars = std.StringHashMap(bool).init(allocator);
+    defer vars.deinit();
     var all = std.ArrayList([]const u8).init(allocator);
     defer all.deinit();
     var data = std.ArrayList([]const u8).init(allocator);
@@ -41,45 +41,7 @@ pub fn main() !void {
     try data.append("section .data\n");
     try normal.append("_start:\n");
 
-    // var loop_id = lines.rest().len;
-    while (lines.next()) |line| {
-        var tokens = std.mem.tokenize(u8, line, " ");
-        const first = tokens.next().?;
-        var var_name: []const u8 = undefined;
-
-        if (eql(u8, first, "{")) {
-            try normal.append("l1:\n");
-        } else if (eql(u8, first, "}")) {
-            try normal.append("l2:\n");
-        } else if (!eql(u8, first, "if") and !eql(u8, first, "while")) {
-            var_name = first;
-            _ = tokens.next().?; // = TODO может быть ошибка если нет равно в выражении
-
-            if (!vars.contains(var_name)) {
-                // print("\n-------------\n", .{});
-                try vars.put(var_name, true); // добавлени в спиисок переменных
-
-                try data.append(var_name);
-                try data.append(" ");
-                try data.append(var_type);
-                try data.append(" 0\n");
-            }
-            try var_expr(var_name, &tokens, &normal, &vars);
-        } else if (eql(u8, first, "if")) {
-            // TODO cmp
-            try var_expr(var_name, &tokens, &normal, &vars);
-            try normal.append("pop\n");
-            try normal.append("jne l1\n");
-            try normal.append("jmp l2\n");
-
-            // TODO обработка
-
-        } else if (eql(u8, first, "while")) {
-            // TODO jmp
-        } else {
-            unreachable;
-        }
-    }
+    try bracket_expr(&lines, &normal, &data, &vars);
 
     try conctenate(&all, &data);
     try all.append("section .text\n");
@@ -93,6 +55,75 @@ pub fn main() !void {
     for (all.items) |value| {
         try output_file.writeAll(value);
     }
+}
+
+fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList([]const u8), data: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool)) !void {
+    while (lines.next()) |line| {
+        var tokens = std.mem.tokenize(u8, line, " ");
+        const first = tokens.next().?;
+        var var_name: []const u8 = undefined;
+
+        if (eql(u8, first, "{")) {
+            try add_block(normal);
+            try bracket_expr(lines, normal, data, vars);
+        } else if (eql(u8, first, "}")) {
+            try add_block(normal);
+            break;
+        } else if (!eql(u8, first, "if") and !eql(u8, first, "while")) {
+            var_name = first;
+            _ = tokens.next().?; // = TODO может быть ошибка если нет равно в выражении
+
+            if (!vars.contains(var_name)) {
+                try vars.put(var_name, true); // добавлени в спиисок переменных
+
+                try data.append(var_name);
+                try data.append(" ");
+                try data.append(var_type);
+                try data.append(" 0\n");
+            }
+            try var_expr(var_name, &tokens, normal, vars);
+        } else if (eql(u8, first, "if")) {
+            try if_expr(&tokens, normal, vars);
+        } else if (eql(u8, first, "while")) {
+            // TODO jmp | while_expr
+        } else {
+            unreachable;
+        }
+    }
+}
+
+fn add_block(block: *std.ArrayList([]const u8)) !void {
+    try block.append(current_block());
+    block_counter += 1;
+    try block.append(":\n");
+}
+
+fn current_block() []const u8 { // l1 TODO
+    return switch (block_counter) {
+        1 => "l1",
+        2 => "l2",
+        3 => "l3",
+        4 => "l4",
+        5 => "l5",
+        6 => "l6",
+        7 => "l7",
+        8 => "l8",
+        9 => "l9",
+        else => unreachable,
+    };
+}
+
+fn if_expr(tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool)) !void {
+    try compute_expr(block, tokens, vars);
+
+    try block.append("pop r8\ncmp r8, 0\njne ");
+
+    try block.append(current_block());
+    try block.append("\njmp ");
+    block_counter += 1;
+    try block.append(current_block());
+    block_counter -= 1;
+    try block.append("\n");
 }
 
 fn var_expr(var_name: []const u8, tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool)) !void {
