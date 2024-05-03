@@ -28,7 +28,7 @@ pub fn main() !void {
     defer vars.deinit();
 
     var lines = std.mem.tokenize(u8, code, "\n");
-    
+
     var all = std.ArrayList([]const u8).init(allocator);
     defer all.deinit();
     var data = std.ArrayList([]const u8).init(allocator);
@@ -76,7 +76,7 @@ pub fn main() !void {
 
         } else if (eql(u8, first, "while")) {
             // TODO jmp
-        } else  {
+        } else {
             unreachable;
         }
     }
