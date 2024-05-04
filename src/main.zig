@@ -1,25 +1,15 @@
-// возможности языка: переменные, операции, циклы, ветвления
-// TODO:
-//  - обработка любых выражений +
-//  - инициализация переменных +
-//  ! перевод в asm:
-//      - (+,-,/,%,*) +
-//      - if / while -
-//  ! обработка выхода дерева -
-
 const std = @import("std");
 const print = std.debug.print;
 const eql = std.mem.eql;
 
 const Tree = @import("root.zig").Tree;
 
-// const flags = struct { brackets: u32 };
 const CompileError = error{ SyntaxError, ShadowingVariable, NedopisanCod };
 const allocator = std.heap.page_allocator;
 const var_type = "dq";
 const delim: std.mem.DelimiterType = .any;
 
-var block_counter: usize = 1;
+var label_counter: u8 = 1;
 
 pub fn main() !void {
     const path_to_code = "code"; // путь к файлу с кодом
@@ -64,10 +54,14 @@ fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList
         var var_name: []const u8 = undefined;
 
         if (eql(u8, first, "{")) {
-            try add_block(normal);
+            try normal.append(current_label());
+            try normal.append("\n");
+            label_counter += 1;
             try bracket_expr(lines, normal, data, vars);
         } else if (eql(u8, first, "}")) {
-            try add_block(normal);
+            try normal.append(current_label());
+            try normal.append("\n");
+            label_counter += 1;
             break;
         } else if (!eql(u8, first, "if") and !eql(u8, first, "while")) {
             var_name = first;
@@ -92,14 +86,8 @@ fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList
     }
 }
 
-fn add_block(block: *std.ArrayList([]const u8)) !void {
-    try block.append(current_block());
-    block_counter += 1;
-    try block.append(":\n");
-}
-
-fn current_block() []const u8 { // l1 TODO
-    return switch (block_counter) {
+fn current_label() []const u8 { // TODO для всех вариантов
+    return switch (label_counter) {
         1 => "l1",
         2 => "l2",
         3 => "l3",
@@ -117,12 +105,11 @@ fn if_expr(tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]co
     try compute_expr(block, tokens, vars);
 
     try block.append("pop r8\ncmp r8, 0\njne ");
-
-    try block.append(current_block());
+    try block.append(current_label());
     try block.append("\njmp ");
-    block_counter += 1;
-    try block.append(current_block());
-    block_counter -= 1;
+    label_counter += 1;
+    try block.append(current_label());
+    label_counter -= 1;
     try block.append("\n");
 }
 
