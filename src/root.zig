@@ -125,7 +125,7 @@ pub fn Tree(comptime T: type) type {
                             if (prev_node.node_type != .Oper) {
                                 prev_node = prev_node.parent.?;
                             }
-                            if (prev_node.lvl == new_node.lvl and (eql(u8, prev_node.value, "*") or eql(u8, prev_node.value, "/") or eql(u8, prev_node.value, "&")) and !(eql(u8, new_node.value, "*") or eql(u8, new_node.value, "/") or eql(u8, new_node.value, "&"))) {
+                            if (prev_node.lvl == new_node.lvl and (eql(u8, prev_node.value, "*") or eql(u8, prev_node.value, "/") or eql(u8, prev_node.value, "&")) and !(eql(u8, new_node.value, "*") or eql(u8, new_node.value, "/") or eql(u8, new_node.value, "%"))) {
                                 const parent = prev_node.parent.?;
                                 prev_node.parent = new_node;
                                 parent.right = new_node;
