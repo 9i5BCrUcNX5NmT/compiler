@@ -11,6 +11,14 @@ const delim: std.mem.DelimiterType = .any;
 
 var label_counter: u8 = 1;
 
+var start: usize = 0;
+var buf: [1024]u8 = undefined; // максимум лейблов = 45
+var fbs = std.io.fixedBufferStream(&buf);
+const writer = fbs.writer();
+
+const flag = enum { Loop, NotLoop };
+var expr_flag: flag = .NotLoop;
+
 pub fn main() !void {
     const path_to_code = "code"; // путь к файлу с кодом
     const code = @embedFile(path_to_code);
@@ -36,7 +44,6 @@ pub fn main() !void {
     try conctenate(&all, &data);
     try all.append("section .text\n");
     try conctenate(&all, &normal);
-    try all.append("mov r15, r8\ncall _print\n");
     try all.append("exit:\nmov rax, 60\nsyscall\n");
 
     const output_file = try std.fs.cwd().createFile("asm/output.asm", .{});
@@ -54,16 +61,26 @@ fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList
         var var_name: []const u8 = undefined;
 
         if (eql(u8, first, "{")) {
-            try normal.append(current_label());
-            try normal.append("\n");
-            label_counter += 1;
+            try normal.append("start");
+            try normal.append(try current_label());
+            try normal.append(":\n");
             try bracket_expr(lines, normal, data, vars);
         } else if (eql(u8, first, "}")) {
-            try normal.append(current_label());
-            try normal.append("\n");
+            if (expr_flag == .Loop) {
+                try normal.append("jmp ");
+                try normal.append("loop");
+                try normal.append(try current_label());
+                try normal.append("\n");
+
+                expr_flag = .NotLoop;
+            }
+
+            try normal.append("end");
+            try normal.append(try current_label());
+            try normal.append(":\n");
             label_counter += 1;
             break;
-        } else if (!eql(u8, first, "if") and !eql(u8, first, "while")) {
+        } else if (!eql(u8, first, "if") and !eql(u8, first, "while") and !eql(u8, first, "print")) {
             var_name = first;
             _ = tokens.next().?; // = TODO может быть ошибка если нет равно в выражении
 
@@ -75,41 +92,79 @@ fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList
                 try data.append(var_type);
                 try data.append(" 0\n");
             }
+
             try var_expr(var_name, &tokens, normal, vars);
         } else if (eql(u8, first, "if")) {
             try if_expr(&tokens, normal, vars);
         } else if (eql(u8, first, "while")) {
-            // TODO jmp | while_expr
+            expr_flag = .Loop;
+
+            try while_expr(&tokens, normal, vars);
+        } else if (eql(u8, first, "print")) {
+            try print_expr(&tokens, normal, vars);
         } else {
             unreachable;
         }
     }
 }
 
-fn current_label() []const u8 { // TODO для всех вариантов
-    return switch (label_counter) {
-        1 => "l1",
-        2 => "l2",
-        3 => "l3",
-        4 => "l4",
-        5 => "l5",
-        6 => "l6",
-        7 => "l7",
-        8 => "l8",
-        9 => "l9",
-        else => unreachable,
-    };
+fn current_label() ![]const u8 {
+    try writer.print("{d}", .{label_counter});
+
+    if (label_counter > 45) {
+        return CompileError.NedopisanCod;
+    }
+
+    const written = fbs.getWritten();
+    const label = written[start..];
+    start = written.len;
+
+    return label;
+}
+
+fn print_expr(tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool)) !void {
+    if (is_coplex_expr(tokens)) {
+        try compute_expr(block, tokens, vars);
+    } else {
+        try block.append("push ");
+
+        const nxt = tokens.next().?;
+        if (vars.contains(nxt)) {
+            try block.append("qword[");
+            try block.append(nxt);
+            try block.append("]");
+        } else {
+            try block.append(nxt);
+        }
+        try block.append("\n");
+    }
+
+    try block.append("pop r15\ncall _print\n"); // зависимость от библиотеки print_digit.asm
 }
 
 fn if_expr(tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool)) !void {
     try compute_expr(block, tokens, vars);
 
-    try block.append("pop r8\ncmp r8, 0\njne ");
-    try block.append(current_label());
+    try block.append("pop r8\ncmp r8, 0\njne start");
+    try block.append(try current_label());
     try block.append("\njmp ");
-    label_counter += 1;
-    try block.append(current_label());
-    label_counter -= 1;
+    try block.append("end");
+    try block.append(try current_label());
+    try block.append("\n");
+}
+
+fn while_expr(tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool)) !void {
+    try block.append("loop");
+    try block.append(try current_label());
+    try block.append(":\n");
+
+    try compute_expr(block, tokens, vars); // TODO cmp
+
+    try block.append("pop r8\ncmp r8, 0\njne start");
+    try block.append(try current_label());
+    try block.append("\njmp ");
+    try block.append("end");
+    try block.append(try current_label());
     try block.append("\n");
 }
 
@@ -170,7 +225,7 @@ fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterato
 
     try tree.pull_tree(tokens, vars);
 
-    try tree.gen_output();
+    try tree.gen_output(try current_label());
 
     for (tree.output.items) |value| {
         try block.append(value);
@@ -197,23 +252,6 @@ fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterato
 //     }
 //     return trust;
 // }
-
-pub fn what_jump_are_you(token: []const u8) []const u8 {
-    if (eql(u8, token, ">")) {
-        return "ja";
-    } else if (eql(u8, token, "<")) {
-        return "jl";
-    } else if (eql(u8, token, "==")) {
-        return "je";
-    } else if (eql(u8, token, ">=")) {
-        return "jge";
-    } else if (eql(u8, token, "<=")) {
-        return "jle";
-    } else if (eql(u8, token, "!=")) {
-        return "jne";
-    }
-    return "jmp";
-}
 
 // pub fn trim_str(str: anytype, delim: []const u8) ![][]const u8 {
 //     const allocator = std.heap.page_allocator;

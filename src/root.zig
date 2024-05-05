@@ -176,12 +176,12 @@ pub fn Tree(comptime T: type) type {
             }
         }
 
-        pub fn gen_output(self: *Self) !void {
+        pub fn gen_output(self: *Self, current_label: []const u8) !void {
             const root = self.root.?;
-            try push_node(self, root);
+            try push_node(self, root, current_label);
         }
 
-        fn push_node(self: *Self, node: *Node) !void {
+        fn push_node(self: *Self, node: *Node, current_label: []const u8) !void {
             var str = &self.output;
             if (node.node_type == .Var) {
                 try str.append("push qword[");
@@ -192,8 +192,8 @@ pub fn Tree(comptime T: type) type {
                 try str.append(node.value);
                 try str.append("\n");
             } else {
-                try push_node(self, node.right.?);
-                try push_node(self, node.left.?);
+                try push_node(self, node.right.?, current_label);
+                try push_node(self, node.left.?, current_label);
 
                 const operation = oper_to_asm(node.value);
 
@@ -221,6 +221,23 @@ pub fn Tree(comptime T: type) type {
                     } else if (eql(u8, node.value, "/")) {
                         try str.append("push rax\n");
                     }
+                } else if (eql(u8, operation, "cmp")) {
+                    try str.append(reg1);
+                    try str.append(", ");
+                    try str.append(reg2);
+                    try str.append("\n");
+
+                    const my_jump = what_jump_are_you(node.value);
+                    try str.append(my_jump);
+                    try str.append(" pos");
+                    try str.append(current_label);
+                    try str.append("\npush 0\njmp neg");
+                    try str.append(current_label);
+                    try str.append("\npos");
+                    try str.append(current_label);
+                    try str.append(":\npush 1\nneg");
+                    try str.append(current_label);
+                    try str.append(":\n");
                 } else {
                     try str.append(reg1);
                     try str.append(", ");
@@ -242,10 +259,27 @@ pub fn Tree(comptime T: type) type {
                 '=' => "mov",
                 '|' => "or",
                 '&' => "and",
+                inline '>', '<' => "cmp",
                 inline '%', '/' => "idiv",
-                // else => "cmp", TODO
                 else => unreachable,
-            } else unreachable;
+            } else if (eql(u8, ">=", oper) or eql(u8, "<=", oper) or eql(u8, "==", oper)) "cmp" else unreachable;
+        }
+
+        fn what_jump_are_you(token: []const u8) []const u8 {
+            if (eql(u8, token, ">")) {
+                return "ja";
+            } else if (eql(u8, token, "<")) {
+                return "jl";
+            } else if (eql(u8, token, "==")) {
+                return "je";
+            } else if (eql(u8, token, ">=")) {
+                return "jge";
+            } else if (eql(u8, token, "<=")) {
+                return "jle";
+            } else if (eql(u8, token, "!=")) {
+                return "jne";
+            }
+            return "jmp";
         }
     };
 }
