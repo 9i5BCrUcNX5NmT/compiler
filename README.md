@@ -25,15 +25,12 @@ a = a - 1
 }
 ```
 ### Run
-#### 1
-в начальной папке:
-```
-zig build run
-```
-(depend on zig)
-#### 2
-в папке asm:
-```
-./run.sh output
-```
-(depend on nasm)
+1) в начальной папке:
+  ```
+  zig build run
+  ```
+  
+2) в папке asm:
+  ```
+  ./run.sh output
+  ```
