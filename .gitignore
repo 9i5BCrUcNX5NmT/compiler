@@ -1,5 +1,2 @@
 /zig-cache
 /zig-out
-/asm
-/src/code
-grammar.y
