@@ -19,16 +19,15 @@ a = a - 1
 }
 аналогично для while
 ### Run
-1:
-    в папке:
-    '''bash
-    zig build run
-    '''
-    (depend on zig)
-2:
-    в папке asm:
-    '''bash
-    ./run.sh output
-    '''
-    (результат получаем в консоли)
-    (depend on nasm)
+#### 1
+в начальной папке:
+```
+zig build run
+```
+(depend on zig)
+#### 2
+в папке asm:
+```
+./run.sh output
+```
+(depend on nasm)
