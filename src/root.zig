@@ -7,9 +7,41 @@ const endsWith = std.mem.endsWith;
 
 const CompileError = error{NepravilnoeVirajenie};
 
-// регистры для декомпозиции дерева
-const reg1 = "r8";
-const reg2 = "r9";
+pub const Node = struct {
+    const NodeType = enum { Oper, Var, Const };
+
+    value: []const u8,
+    node_type: NodeType,
+    parent: ?(*Node),
+    lvl: usize,
+    right: ?(*Node),
+    left: ?(*Node),
+
+    fn find_type(token: []const u8, vars: *std.StringHashMap(bool)) NodeType {
+        if (token.len == 1) switch (token[0]) {
+            inline '+', '-', '*', '/', '=', '>', '<', '%', '|', '&' => return .Oper,
+            else => {},
+        } else if (eql(u8, ">=", token) or eql(u8, "<=", token) or eql(u8, "==", token)) { // TODO булевые операции
+            return .Oper;
+        }
+        if (vars.contains(token)) {
+            return .Var;
+        } else {
+            return .Const;
+        }
+    }
+
+    fn init(token: []const u8, lvl: usize, vars: *std.StringHashMap(bool)) Node {
+        return Node{
+            .value = token,
+            .node_type = find_type(token, vars),
+            .parent = null,
+            .lvl = lvl,
+            .right = null,
+            .left = null,
+        };
+    }
+};
 
 pub fn Tree(comptime T: type) type {
     return struct {
@@ -19,42 +51,6 @@ pub fn Tree(comptime T: type) type {
         root: ?(*Node),
         allocator: Allocator,
         output: std.ArrayList([]const u8),
-
-        pub const Node = struct {
-            const NodeType = enum { Oper, Var, Const };
-
-            value: T,
-            node_type: NodeType,
-            parent: ?(*Node),
-            lvl: usize,
-            right: ?(*Node),
-            left: ?(*Node),
-
-            fn find_type(token: T, vars: *std.StringHashMap(bool)) NodeType {
-                if (token.len == 1) switch (token[0]) {
-                    inline '+', '-', '*', '/', '=', '>', '<', '%', '|', '&' => return .Oper,
-                    else => {},
-                } else if (eql(u8, ">=", token) or eql(u8, "<=", token) or eql(u8, "==", token)) { // TODO булевые операции
-                    return .Oper;
-                }
-                if (vars.contains(token)) {
-                    return .Var;
-                } else {
-                    return .Const;
-                }
-            }
-
-            fn init(token: T, lvl: usize, vars: *std.StringHashMap(bool)) Node {
-                return Node{
-                    .value = token,
-                    .node_type = find_type(token, vars),
-                    .parent = null,
-                    .lvl = lvl,
-                    .right = null,
-                    .left = null,
-                };
-            }
-        };
 
         pub fn init(allocator: Allocator) Self {
             return Self{ .tree = std.ArrayList(Node).init(allocator), .allocator = allocator, .output = std.ArrayList([]const u8).init(allocator), .root = null };
@@ -126,11 +122,16 @@ pub fn Tree(comptime T: type) type {
                                 prev_node = prev_node.parent.?;
                             }
                             if (prev_node.lvl == new_node.lvl and (eql(u8, prev_node.value, "*") or eql(u8, prev_node.value, "/") or eql(u8, prev_node.value, "&")) and !(eql(u8, new_node.value, "*") or eql(u8, new_node.value, "/") or eql(u8, new_node.value, "%"))) {
-                                const parent = prev_node.parent.?;
-                                prev_node.parent = new_node;
-                                parent.right = new_node;
-                                new_node.parent = parent;
-                                new_node.right = prev_node;
+                                if (prev_node.parent) |parent| {
+                                    prev_node.parent = new_node;
+                                    parent.right = new_node;
+                                    new_node.parent = parent;
+                                    new_node.right = prev_node;
+                                } else {
+                                    self.root = new_node;
+                                    new_node.right = prev_node;
+                                    prev_node.parent = new_node;
+                                }
                             } else {
                                 prev_node.right.?.parent = new_node;
                                 new_node.right = prev_node.right;
@@ -174,112 +175,6 @@ pub fn Tree(comptime T: type) type {
                 }
                 print("\n--------------------------\n", .{});
             }
-        }
-
-        pub fn gen_output(self: *Self, current_label: []const u8) !void {
-            const root = self.root.?;
-            try push_node(self, root, current_label);
-        }
-
-        fn push_node(self: *Self, node: *Node, current_label: []const u8) !void {
-            var str = &self.output;
-            if (node.node_type == .Var) {
-                try str.append("push qword[");
-                try str.append(node.value);
-                try str.append("]\n");
-            } else if (node.node_type == .Const) {
-                try str.append("push ");
-                try str.append(node.value);
-                try str.append("\n");
-            } else {
-                try push_node(self, node.right.?, current_label);
-                try push_node(self, node.left.?, current_label);
-
-                const operation = oper_to_asm(node.value);
-
-                if (eql(u8, operation, "idiv")) {
-                    try str.append("pop rax\ncqo\n");
-                } else {
-                    try str.append("pop ");
-                    try str.append(reg1);
-                    try str.append("\n");
-                }
-
-                try str.append("pop ");
-                try str.append(reg2);
-                try str.append("\n");
-
-                try str.append(operation);
-                try str.append(" ");
-
-                if (eql(u8, operation, "idiv")) {
-                    try str.append(reg2);
-                    try str.append("\n");
-
-                    if (eql(u8, node.value, "%")) {
-                        try str.append("push rdx\n");
-                    } else if (eql(u8, node.value, "/")) {
-                        try str.append("push rax\n");
-                    }
-                } else if (eql(u8, operation, "cmp")) {
-                    try str.append(reg1);
-                    try str.append(", ");
-                    try str.append(reg2);
-                    try str.append("\n");
-
-                    const my_jump = what_jump_are_you(node.value);
-                    try str.append(my_jump);
-                    try str.append(" pos");
-                    try str.append(current_label);
-                    try str.append("\npush 0\njmp neg");
-                    try str.append(current_label);
-                    try str.append("\npos");
-                    try str.append(current_label);
-                    try str.append(":\npush 1\nneg");
-                    try str.append(current_label);
-                    try str.append(":\n");
-                } else {
-                    try str.append(reg1);
-                    try str.append(", ");
-                    try str.append(reg2);
-                    try str.append("\n");
-
-                    try str.append("push ");
-                    try str.append(reg1);
-                    try str.append("\n");
-                }
-            }
-        }
-
-        fn oper_to_asm(oper: T) []const u8 {
-            return if (oper.len == 1) switch (oper[0]) {
-                '+' => "add",
-                '-' => "sub",
-                '*' => "imul", // mul работает криво
-                '=' => "mov",
-                '|' => "or",
-                '&' => "and",
-                inline '>', '<' => "cmp",
-                inline '%', '/' => "idiv",
-                else => unreachable,
-            } else if (eql(u8, ">=", oper) or eql(u8, "<=", oper) or eql(u8, "==", oper)) "cmp" else unreachable;
-        }
-
-        fn what_jump_are_you(token: []const u8) []const u8 {
-            if (eql(u8, token, ">")) {
-                return "ja";
-            } else if (eql(u8, token, "<")) {
-                return "jl";
-            } else if (eql(u8, token, "==")) {
-                return "je";
-            } else if (eql(u8, token, ">=")) {
-                return "jge";
-            } else if (eql(u8, token, "<=")) {
-                return "jle";
-            } else if (eql(u8, token, "!=")) {
-                return "jne";
-            }
-            return "jmp";
         }
     };
 }

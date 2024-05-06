@@ -1,2 +1,5 @@
-a = 5
-print a + 100 * 5
+c = 1
+b = 1
+a = 1
+a = a * b + c
+print a

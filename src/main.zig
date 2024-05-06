@@ -2,7 +2,11 @@ const std = @import("std");
 const print = std.debug.print;
 const eql = std.mem.eql;
 
-const Tree = @import("root.zig").Tree;
+const lib = @import("root.zig");
+
+// регистры для декомпозиции дерева
+const reg1 = "r8";
+const reg2 = "r9";
 
 const CompileError = error{ SyntaxError, ShadowingVariable, NedopisanCod };
 const allocator = std.heap.page_allocator;
@@ -18,6 +22,7 @@ const writer = fbs.writer();
 
 const flag = enum { Loop, NotLoop };
 var expr_flag: flag = .NotLoop;
+var loop_label: []const u8 = undefined;
 
 pub fn main() !void {
     const path_to_code = "code"; // путь к файлу с кодом
@@ -45,6 +50,7 @@ pub fn main() !void {
     try all.append("section .text\n");
     try conctenate(&all, &normal);
     try all.append("exit:\nmov rax, 60\nsyscall\n");
+    try all.append("pos:\npush 1\nret\nneg:\npush 0\nret\n");
 
     const output_file = try std.fs.cwd().createFile("asm/output.asm", .{});
     defer output_file.close();
@@ -69,7 +75,7 @@ fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList
             if (expr_flag == .Loop) {
                 try normal.append("jmp ");
                 try normal.append("loop");
-                try normal.append(try current_label());
+                try normal.append(loop_label);
                 try normal.append("\n");
 
                 expr_flag = .NotLoop;
@@ -111,7 +117,7 @@ fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList
 fn current_label() ![]const u8 {
     try writer.print("{d}", .{label_counter});
 
-    if (label_counter > 45) {
+    if (label_counter > 378) {
         return CompileError.NedopisanCod;
     }
 
@@ -157,6 +163,7 @@ fn while_expr(tokens: *std.mem.TokenIterator(u8, delim), block: *std.ArrayList([
     try block.append("loop");
     try block.append(try current_label());
     try block.append(":\n");
+    loop_label = try current_label();
 
     try compute_expr(block, tokens, vars); // TODO cmp
 
@@ -219,17 +226,126 @@ fn conctenate(out: *std.ArrayList([]const u8), in: *std.ArrayList([]const u8)) !
 }
 
 fn compute_expr(block: *std.ArrayList([]const u8), tokens: *std.mem.TokenIterator(u8, delim), vars: *std.StringHashMap(bool)) !void {
-    var tree = Tree([]const u8).init(allocator);
+    var tree = lib.Tree([]const u8).init(allocator);
     defer tree.deinit();
     errdefer tree.print_tree();
 
     try tree.pull_tree(tokens, vars);
 
-    try tree.gen_output(try current_label());
+    try gen_output(&tree);
 
     for (tree.output.items) |value| {
         try block.append(value);
     }
+}
+
+fn gen_output(tree: *lib.Tree([]const u8)) !void {
+    const root = tree.root.?;
+    try push_node(tree, root);
+}
+
+fn push_node(self: *lib.Tree([]const u8), node: *lib.Node) !void {
+    var str = &self.output;
+    if (node.node_type == .Var) {
+        try str.append("push qword[");
+        try str.append(node.value);
+        try str.append("]\n");
+    } else if (node.node_type == .Const) {
+        try str.append("push ");
+        try str.append(node.value);
+        try str.append("\n");
+    } else {
+        try push_node(self, node.right.?);
+        try push_node(self, node.left.?);
+
+        const operation = oper_to_asm(node.value);
+
+        if (eql(u8, operation, "idiv")) {
+            try str.append("pop rax\ncqo\n");
+        } else {
+            try str.append("pop ");
+            try str.append(reg1);
+            try str.append("\n");
+        }
+
+        try str.append("pop ");
+        try str.append(reg2);
+        try str.append("\n");
+
+        try str.append(operation);
+        try str.append(" ");
+
+        if (eql(u8, operation, "idiv")) {
+            try str.append(reg2);
+            try str.append("\n");
+
+            if (eql(u8, node.value, "%")) {
+                try str.append("push rdx\n");
+            } else if (eql(u8, node.value, "/")) {
+                try str.append("push rax\n");
+            }
+        } else if (eql(u8, operation, "cmp")) {
+            try str.append(reg1);
+            try str.append(", ");
+            try str.append(reg2);
+            try str.append("\n");
+
+            const my_jump = what_jump_are_you(node.value);
+            const cur_label = try current_label();
+            try str.append(my_jump);
+            try str.append(" pos");
+            try str.append(cur_label);
+            try str.append("\npush 0\njmp neg");
+            try str.append(cur_label);
+            try str.append("\npos");
+            try str.append(cur_label);
+            try str.append(":\npush 1\nneg");
+            try str.append(cur_label);
+            try str.append(":\n");
+
+            label_counter += 1;
+        } else {
+            try str.append(reg1);
+            try str.append(", ");
+            try str.append(reg2);
+            try str.append("\n");
+
+            try str.append("push ");
+            try str.append(reg1);
+            try str.append("\n");
+        }
+    }
+}
+
+fn oper_to_asm(oper: []const u8) []const u8 {
+    return if (oper.len == 1) switch (oper[0]) {
+        '+' => "add",
+        '-' => "sub",
+        '*' => "imul", // mul работает криво
+        '=' => "mov",
+        '|' => "or",
+        '&' => "and",
+        inline '>', '<' => "cmp",
+        inline '%', '/' => "idiv",
+        else => unreachable,
+    } else if (eql(u8, ">=", oper) or eql(u8, "<=", oper) or eql(u8, "==", oper)) "cmp" else unreachable;
+}
+
+fn what_jump_are_you(token: []const u8) []const u8 {
+    if (eql(u8, token, ">")) {
+        return "ja";
+    } else if (eql(u8, token, "<")) {
+        return "jl";
+    } else if (eql(u8, token, "==")) {
+        return "je";
+    } else if (eql(u8, token, ">=")) {
+        return "jge";
+    } else if (eql(u8, token, "<=")) {
+        return "jle";
+    } else if (eql(u8, token, "!=")) {
+        return "jne";
+    }
+    return "jmp";
 }
 
 // pub fn in_str(str1: []const u8, str2: []const u8) bool {
