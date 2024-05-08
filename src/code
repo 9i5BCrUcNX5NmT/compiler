@@ -1,5 +1,20 @@
-c = 1
-b = 1
-a = 1
-a = a * b + c
+a = 1234567890
+
+while a % 2 == 0
+{
+    a = a / 2
+    print 2
+}
+
+d = 3
+
+while a > 1
+{
+    while a % d == 0
+    {
+        a = a / d
+        print d
+    }
+    d = d + 2
+}
 print a

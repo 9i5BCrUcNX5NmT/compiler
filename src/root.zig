@@ -19,9 +19,9 @@ pub const Node = struct {
 
     fn find_type(token: []const u8, vars: *std.StringHashMap(bool)) NodeType {
         if (token.len == 1) switch (token[0]) {
-            inline '+', '-', '*', '/', '=', '>', '<', '%', '|', '&' => return .Oper,
+            inline '+', '-', '*', '/', '>', '<', '%', '|', '&' => return .Oper,
             else => {},
-        } else if (eql(u8, ">=", token) or eql(u8, "<=", token) or eql(u8, "==", token)) { // TODO булевые операции
+        } else if (eql(u8, ">=", token) or eql(u8, "<=", token) or eql(u8, "==", token) or eql(u8, "!=", token)) { // TODO булевые операции
             return .Oper;
         }
         if (vars.contains(token)) {
@@ -113,31 +113,28 @@ pub fn Tree(comptime T: type) type {
                             }
                         }
 
-                        if (prev_node.lvl > new_node.lvl) {
-                            self.root = new_node;
-                            new_node.right = prev_node;
-                            prev_node.parent = new_node;
-                        } else {
-                            if (prev_node.node_type != .Oper) {
-                                prev_node = prev_node.parent.?;
-                            }
-                            if (prev_node.lvl == new_node.lvl and (eql(u8, prev_node.value, "*") or eql(u8, prev_node.value, "/") or eql(u8, prev_node.value, "&")) and !(eql(u8, new_node.value, "*") or eql(u8, new_node.value, "/") or eql(u8, new_node.value, "%"))) {
-                                if (prev_node.parent) |parent| {
-                                    prev_node.parent = new_node;
-                                    parent.right = new_node;
-                                    new_node.parent = parent;
-                                    new_node.right = prev_node;
-                                } else {
-                                    self.root = new_node;
-                                    new_node.right = prev_node;
-                                    prev_node.parent = new_node;
-                                }
+                        if (prev_node.node_type != .Oper) {
+                            prev_node = prev_node.parent.?;
+                        }
+
+                        if (prev_node.lvl > new_node.lvl or !(!(eql(u8, prev_node.value, "*") or eql(u8, prev_node.value, "/") or eql(u8, prev_node.value, "%") or eql(u8, prev_node.value, "&")) and (eql(u8, new_node.value, "*") or eql(u8, new_node.value, "/") or eql(u8, new_node.value, "%") or eql(u8, new_node.value, "&")))) {
+                            // 1 - 2
+                            if (prev_node.parent) |parent| {
+                                prev_node.parent = new_node;
+                                parent.right = new_node;
+                                new_node.parent = parent;
+                                new_node.right = prev_node;
                             } else {
-                                prev_node.right.?.parent = new_node;
-                                new_node.right = prev_node.right;
-                                prev_node.right = new_node;
-                                new_node.parent = prev_node;
+                                self.root = new_node;
+                                new_node.right = prev_node;
+                                prev_node.parent = new_node;
                             }
+                        } else {
+                            // 2 - 1
+                            prev_node.right.?.parent = new_node;
+                            new_node.right = prev_node.right;
+                            prev_node.right = new_node;
+                            new_node.parent = prev_node;
                         }
                     }
                 }

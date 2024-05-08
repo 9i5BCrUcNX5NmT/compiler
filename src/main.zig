@@ -21,7 +21,7 @@ var fbs = std.io.fixedBufferStream(&buf);
 const writer = fbs.writer();
 
 const flag = enum { Loop, NotLoop };
-var expr_flag: flag = .NotLoop;
+var loop_flag: flag = .NotLoop;
 var loop_label: []const u8 = undefined;
 
 pub fn main() !void {
@@ -38,19 +38,22 @@ pub fn main() !void {
     defer data.deinit();
     var normal = std.ArrayList([]const u8).init(allocator);
     defer normal.deinit();
+    var end = std.ArrayList([]const u8).init(allocator);
+    defer end.deinit();
+    var flags = std.ArrayList(flag).init(allocator);
+    defer flags.deinit();
 
     try all.append("global _start\n");
     try all.append("extern _print\n");
     try data.append("section .data\n");
     try normal.append("_start:\n");
 
-    try bracket_expr(&lines, &normal, &data, &vars);
+    try bracket_expr(&lines, &normal, &data, &vars, &end, &flags);
 
     try conctenate(&all, &data);
     try all.append("section .text\n");
     try conctenate(&all, &normal);
     try all.append("exit:\nmov rax, 60\nsyscall\n");
-    try all.append("pos:\npush 1\nret\nneg:\npush 0\nret\n");
 
     const output_file = try std.fs.cwd().createFile("asm/output.asm", .{});
     defer output_file.close();
@@ -60,30 +63,33 @@ pub fn main() !void {
     }
 }
 
-fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList([]const u8), data: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool)) !void {
+fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList([]const u8), data: *std.ArrayList([]const u8), vars: *std.StringHashMap(bool), end: *std.ArrayList([]const u8), flags: *std.ArrayList(flag)) !void {
     while (lines.next()) |line| {
         var tokens = std.mem.tokenize(u8, line, " ");
         const first = tokens.next().?;
         var var_name: []const u8 = undefined;
 
         if (eql(u8, first, "{")) {
+            try end.append(":\n");
+            try end.append(try current_label());
+            try end.append("end");
+
+            if (flags.pop() == .Loop) {
+                try end.append("\n");
+                try end.append(loop_label);
+                try end.append("loop");
+                try end.append("jmp ");
+            }
+
             try normal.append("start");
             try normal.append(try current_label());
             try normal.append(":\n");
-            try bracket_expr(lines, normal, data, vars);
+
+            try bracket_expr(lines, normal, data, vars, end, flags);
         } else if (eql(u8, first, "}")) {
-            if (expr_flag == .Loop) {
-                try normal.append("jmp ");
-                try normal.append("loop");
-                try normal.append(loop_label);
-                try normal.append("\n");
-
-                expr_flag = .NotLoop;
+            for (0..7) |_| {
+                try normal.append(end.pop());
             }
-
-            try normal.append("end");
-            try normal.append(try current_label());
-            try normal.append(":\n");
             label_counter += 1;
             break;
         } else if (!eql(u8, first, "if") and !eql(u8, first, "while") and !eql(u8, first, "print")) {
@@ -101,9 +107,10 @@ fn bracket_expr(lines: *std.mem.TokenIterator(u8, delim), normal: *std.ArrayList
 
             try var_expr(var_name, &tokens, normal, vars);
         } else if (eql(u8, first, "if")) {
+            try flags.append(.NotLoop);
             try if_expr(&tokens, normal, vars);
         } else if (eql(u8, first, "while")) {
-            expr_flag = .Loop;
+            try flags.append(.Loop);
 
             try while_expr(&tokens, normal, vars);
         } else if (eql(u8, first, "print")) {
@@ -328,7 +335,7 @@ fn oper_to_asm(oper: []const u8) []const u8 {
         inline '>', '<' => "cmp",
         inline '%', '/' => "idiv",
         else => unreachable,
-    } else if (eql(u8, ">=", oper) or eql(u8, "<=", oper) or eql(u8, "==", oper)) "cmp" else unreachable;
+    } else if (eql(u8, ">=", oper) or eql(u8, "<=", oper) or eql(u8, "==", oper) or eql(u8, "!=", oper)) "cmp" else unreachable;
 }
 
 fn what_jump_are_you(token: []const u8) []const u8 {
@@ -347,38 +354,3 @@ fn what_jump_are_you(token: []const u8) []const u8 {
     }
     return "jmp";
 }
-
-// pub fn in_str(str1: []const u8, str2: []const u8) bool {
-//     if (str1.len < str2.len) {
-//         return false;
-//     }
-//     var trust = true;
-//     for (0..(str1.len - str2.len)) |i| {
-//         const a = str1[i .. str2.len + i];
-//         const b = str2;
-//         for (a, b) |char1, char2| {
-//             if (char1 != char2) {
-//                 trust = false;
-//                 break;
-//             }
-//         }
-//         if (trust) {
-//             return trust;
-//         }
-//     }
-//     return trust;
-// }
-
-// pub fn trim_str(str: anytype, delim: []const u8) ![][]const u8 {
-//     const allocator = std.heap.page_allocator;
-//     var lines = std.ArrayList([]const u8).init(allocator);
-//     var readIter = std.mem.tokenize(u8, str, delim);
-//     while (readIter.next()) |line| {
-//         var readIter = std.mem.tokenize(
-//             u8,
-//             str,
-//         );
-//         try lines.append(line);
-//     }
-//     return lines.items;
-// }
